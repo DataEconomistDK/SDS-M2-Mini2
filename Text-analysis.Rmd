@@ -59,9 +59,17 @@ set.seed(123) # Have to be set every time a rng proces is being made.
 Justify your choices and explain possible alternatives (e.g. removing stopwords, identifying bi/tri-grams, removing verbs or use of stemming, lemmatization etc.)
 
 I load my data. 
+
+0 - hate speech, 1 - offensive language, 2 - neither
 ```{r}
 data_raw <- as_tibble(fread("https://transfer.sh/Zgwhy/twitter_hate_speech.csv"))
 colnames(data_raw) <- c("ID", "class", "tweet")
+
+data_raw$class <- plyr::mapvalues(data_raw$class, 
+                            from = c(0,1,2), 
+                            to = c("hate speech", "offensive language", "neither"))
+
+data_raw
 ```
 
 Now i try to understand the structure of my data. 
@@ -207,22 +215,22 @@ tweets_lsa_umap <- umap(tweets_lsa_loading %>%
 tweets_lsa_umap <- tweets_lsa_umap %>% as.data.frame()
 ```
 
-Now we can make a plot of the LSA map. 
-```{r}
-tweets_lsa_umap %>%
-  ggplot(aes(x = V1, y = V2)) +
-  geom_point(shape = 21, alpha = 0.5)
-```
-
+Now we have performed our LSA which we can now plot as seen below. 
 ```{r}
 tweets_lsa_hdbscan <- tweets_lsa_umap %>% as.matrix() %>% hdbscan(minPts = 500)
-```
 
+tweets_lsa_umap %>%
+  bind_cols(cluster = tweets_lsa_hdbscan$cluster %>% as.factor(),
+            prob = tweets_lsa_hdbscan$membership_prob) %>%
+  ggplot(aes(x = V1, y = V2, col = cluster)) +
+  geom_point(aes(alpha = prob), shape = 21)
+```
+The plot is hard to interpret by us humans, but will be used in the supervised ML part. 
 
 ## Word-embedding model
 Train a word-embedding model of your choice (Word2Vec, GloVe or Fasttext) and use it to calculate average-vector-representations for the tweets.
 
-Here i will use GloVe to make a word-embedding model. We will do so in a quanteda corpus->token->fcm workflow. To create the mebeddings, we will use the text2vec library.
+Here i will use GloVe to make a word-embedding model.
 
 We now want a document term matrix (DTM), which we will need for this analysis. DTM can be described as:
 
@@ -234,21 +242,45 @@ We now want a document term matrix (DTM), which we will need for this analysis. 
 
 Since most pairings of document and term do not occur (they have the value zero), DTMs are usually implemented as sparse matrices.
 
-We here use the tidy and cleaned tweet data. 
+I here use our tidy tweet data and transform it into a dfm. I also define the features. 
 
 ```{r}
-head(tweets_tidy)
-tweets_tidy %>% 
-  cast_dfm(document = ID, term = tweet, value = count)
+tweets_dfm <- tweets_tidy %>% 
+  count(ID, word) %>% 
+  cast_dfm(document = ID, term = word, value = n)
+
+feats <- tweets_dfm %>% 
+  featnames()
+
+tweets_dfm
 ```
-
-
+Did not have time to do more for this task. 
 
 # Explore and compare the 2 "classes of interest" - hate speech vs offensive language.
 
 ## Differences by simple count
-
 Can you see differences by using simple count-based approaches?
+
+```{r}
+topwords_class <- tweets_tidy %>% 
+  group_by(class) %>% 
+  count(word, sort = TRUE)
+
+topwords_class %>%
+  group_by(class) %>%
+  top_n(10) %>%
+  ungroup() %>% 
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(x = word, y = n), fill = class) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Word Counts",
+       x = "Frequency",
+       y = "Top Words") +
+  facet_wrap(~class, scales = "free")
+```
+
+
 
 ## Identifying themes for each class
 Can you identify themes (aka clusters / topics) that are specific for one class or another? Explore them using, e.g. simple crosstabs - topic vs. class and to get more detailed insights within-cluster top (TF-IDF) terms. (This step requires preprocessed/tokenized inputs).

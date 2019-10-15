@@ -13,11 +13,13 @@ output:
 
 # Setup and introduction
 
-Link for google colab:
+Link for google colab: https://colab.research.google.com/drive/1mnp8jrd7AC0lj_j1BnrsHXJi6D9mAzS2 
 
-Link for github: 
+Link for github: https://github.com/DataEconomistDK/SDS-M2-Mini2
 
-This project is made to be read in html, so open the html file in your preferred webbrowser. As standard the code is hidden in this document, but you can show all by pressing the button "Code" in the top right of the document. You can also show individual chunks of code by pressing the buttons "Code" which are placed around in the document. 
+This project is made to be read in html, so open the html file in your preferred webbrowser. As standard the code is hidden in this document, but you can show all by pressing the button "Code" in the top right of the document. You can also show individual chunks of code by pressing the buttons "Code" which are placed around in the document. There is some problems with running code in colab related to the package topic models, just so you are aware. 
+
+I have been on vacation in Israel while making this project, so i had only a few hours to do it, so there is some task missing. Hope you will still enjoy reading it :) 
 
 I set my knitr functions. 
 ```{r}
@@ -58,9 +60,7 @@ set.seed(123) # Have to be set every time a rng proces is being made.
 # Preprocessing and vectorization
 Justify your choices and explain possible alternatives (e.g. removing stopwords, identifying bi/tri-grams, removing verbs or use of stemming, lemmatization etc.)
 
-I load my data. 
-
-0 - hate speech, 1 - offensive language, 2 - neither
+First i load my data, rename columns and rename class values to strings of text. 
 ```{r}
 data_raw <- as_tibble(fread("https://transfer.sh/Zgwhy/twitter_hate_speech.csv"))
 colnames(data_raw) <- c("ID", "class", "tweet")
@@ -68,14 +68,11 @@ colnames(data_raw) <- c("ID", "class", "tweet")
 data_raw$class <- plyr::mapvalues(data_raw$class, 
                             from = c(0,1,2), 
                             to = c("hate speech", "offensive language", "neither"))
-
-data_raw
 ```
 
 Now i try to understand the structure of my data. 
 ```{r}
 head(data_raw, 3)
-dim(data_raw)
 ```
 The first column is just a row number ID, that start at 0 index. Second column is the class which is formatted as 0 - hate speech, 1 - offensive language, 2 - neither, which have been labelled by a human. The third column is the tweet text. In total there is 24.783 tweets.  
 
@@ -101,7 +98,7 @@ data_tidy_clean <- data_tidy %>%
 
 We also do a bit of general cleaning, in this case removing all special characters, numbers and 1-letter words. This is because these are very contextual and does not really carry meaning in themselves.
 
-With tweets we have a scenario of very high amounts of documents, where each document is very little, especially after cleaning and filtering. This can cause problems later for some analysis, and therefore we need to do some extra filtering. Here i first remove words(rows) that only occur 5 or less times. Then i remove whole tweets that only have 5 or less words after cleaning. This way we have more meaningfull tweets for our analysis. 
+With tweets we have a scenario of very high amounts of documents, where each document is very little, especially after cleaning and filtering. This can cause problems later for some analysis, and therefore we need to do some extra filtering. Here i first remove words(rows) that only occur 5 or less times. Then i remove whole tweets that only have 5 or less words after cleaning. This way we have more meaningfull tweets for our analysis.
 
 ```{r}
 tweets_tidy <- data_tidy_clean %>%
@@ -123,6 +120,7 @@ tweets_tidy
 After filtering we have reduced our "bag-of-words" model to only have 66.807 tokens (rows), down from the initial 368.169 tokens in the raw data. This also means our model now includes only ´r number_tweets[1]´ tweets down from the inital 24.783 tweets.
 
 I now create a topwords tibble, by counting up all of the words and see what is the most popular. This can now be plotted to vizualise the top words. 
+
 ```{r}
 topwords <- tweets_tidy %>% 
   count(word, sort = TRUE)
@@ -144,8 +142,6 @@ Know we want to do a tf-idf analysis. Here tf is "term frequency", which is just
 Below i count how many times the word appear in each tweet (n), the total words in each tweet (total), the term frequency (tf), the inverse document frequency (idf) and finally the tf-idf which is the metric we want. 
 
 ```{r}
-head(tweets_tidy, 6)
-
 tweets_tidy_count <- tweets_tidy %>% 
   count(ID, word, sort = TRUE)
 
@@ -175,8 +171,7 @@ tweet_tidy_total %>%
   coord_flip()
 ```
 
-From this plot we can see that the highest tf-idf words often are slang, abbreviations or similar. This is caused by these words being used in only a few tweets very frequent, and others not really using them. 
-
+From this plot we can see that the highest tf-idf words often are slang, abbreviations or similar. These are words we did not see in the top words count plot we made earlier. This is caused by these words being used in only a few tweets very frequent, and others not really using them, as the "authors" of the tweets use very different words. 
 
 ## Latent semantic analysis (LSA)
 Task: dimensionality reduction (LSA-topic modelling) to transform your corpus into a feature matrix.
@@ -225,7 +220,7 @@ tweets_lsa_umap %>%
   ggplot(aes(x = V1, y = V2, col = cluster)) +
   geom_point(aes(alpha = prob), shape = 21)
 ```
-The plot is hard to interpret by us humans, but will be used in the supervised ML part. 
+The plot is hard to interpret by us humans, but can be used in the supervised ML part. But we can see that the appears to be significant clusters, marked by the different colours in the 2 dimensions V1 and V2 out of the total 5 dimensions. 
 
 ## Word-embedding model
 Train a word-embedding model of your choice (Word2Vec, GloVe or Fasttext) and use it to calculate average-vector-representations for the tweets.
@@ -280,10 +275,68 @@ topwords_class %>%
   facet_wrap(~class, scales = "free")
 ```
 
-
+As can be seen from the 3 plots of word counts, "hate speech" and "offensive language" appears to be quite similar in the top words. These are swearing words or similar. The class "neither" don't have any similarities with the other classes, and have what appears to be more neutral words. 
 
 ## Identifying themes for each class
 Can you identify themes (aka clusters / topics) that are specific for one class or another? Explore them using, e.g. simple crosstabs - topic vs. class and to get more detailed insights within-cluster top (TF-IDF) terms. (This step requires preprocessed/tokenized inputs).
+
+We can use unsupervised machinelearning (similar to clustering) to find topics. It searches for patterns within words. It then calculates probabilities that words will occur together. Based on discrete variables (the word counts). Every document is a misture (partial member) of every topic. 
+
+Here i decide on using Latent Dirichlet allocation (LDA). Here we imagine that each tweet each contain words from several topics in a particular proportion. Here each topic is a mixture of words, which could relate to the classes "hate speech", "offensive language" and "neither". 
+
+I here make a 2 topic model with LDA. Here we calculate the beta, which is how a each term relate to each topic by a certain proportion. 
+
+```{r}
+tweets_dfm
+
+tweet_lda <- LDA(tweets_dfm, k = 2, control = list(seed = 123))
+tweet_lda
+
+tweet_topics <- tidy(tweet_lda, matrix = "beta")
+tweet_topics
+```
+
+I now calculate the top words used in each topic and plot them as below. 
+
+```{r}
+tweet_top_terms <- tweet_topics %>% 
+  group_by(topic) %>% 
+  top_n(10, beta) %>% 
+  ungroup() %>% 
+  arrange(topic, -beta)
+
+tweet_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered()
+```
+
+We see that both includes many of the same swear words, so it does not seem to seperate well, on the top words at least. 
+
+To try and understand the topics better i calculate the greatest difference in beta between topic 1 and 2. 
+
+```{r}
+beta_spread <- tweet_topics %>%
+  mutate(topic = paste0("topic", topic)) %>%
+  spread(topic, beta) %>%
+  filter(topic1 > .001 | topic2 > .001) %>%
+  mutate(log_ratio = log2(topic2 / topic1))
+
+beta_spread %>%
+  group_by(direction = log_ratio > 0) %>%
+  top_n(10, abs(log_ratio)) %>%
+  ungroup() %>%
+  mutate(term = reorder(term, log_ratio)) %>%
+  ggplot(aes(term, log_ratio)) +
+  geom_col() +
+  labs(y = "Log2 ratio of beta in topic 2 / topic 1") +
+  coord_flip()
+```
+
+We see that many of the words that relate very different between topics are many neutral words, but also some hard words such as retarded. 
 
 # Predicing hate speech by using superved ML 
 
@@ -291,40 +344,7 @@ Use the ML pipeline (learned in M1) to build a classification model that can ide
 
 Here advanced NLP feature engineering has been used, and thus everything around an overall accuracy of 85 is fine. You will see that it is not easy to lift class 0 accuracy over 0.5
 
-Good Luck!
-
-
-# Basic concepts notes
-
-**NLP**: Natural language processing. How to analyze and understand text. 
-
-**Tokenizing**: Is creating a bag of words. Words in a document are independent. Every seperate body of text is a document. Every unique word is a term. Every occurence of a term is a token. We use the fun: "unnest_tokens". We now have tibble, where each row shows the document and a single token. A collection of documents is called a corpus. 
-
-**Stopwords**: Word that gives structure, but does not have other meaning in themselves. Ex. The, at, and, ect. We remove them by using fun "anti_join", and feeding it the the tibble and all of the stopwords it should remove. 
-
-**Regular expressions**: A sequence of characters used to search text. 
-
-**Word counts**: We often count the number of tokens to count words and plot it to extract some meaning thereoff. 
-
-**Sentiment dictionaries**: We can use different dictionaries where words are labelled with some "sentiment". There can be many different sentiments: positive, negative, fear, joy ect. It can also be ordinal scaled from ec. -5 to 5 for very negative to very positive. Dictionaries does not label all words, and you can therefore use several dictionaries at once, but they all have their specific purpose. You can also add custom words for specific analysis. 
-
-**Topics**: We can use unsupervised machinelearning (similar to clustering) to find topics. It searches for patterns within words. It then calculates probabilities that words will occur together. Based on discrete variables (the word counts). Every document is a misture (partial member) of every topic. 
-
-When we want to search in text we need the correct syntax. 
-
-![Pattern syntax in text search](images/pattern.png)
-
-
-![Basic function for text](images/function.png)
-
-As seen below in the code you properly need to use double backslash. 
-```{r}
-# When using grep(), setting value = TRUE will print the text instead of the indices.
-# You can combine patterns such as a digit, "\\d", followed by a dot "\\.", with "\\d\\."
-# You can search for a word by simply using the word as your pattern. pattern = 'word'
-```
-
-
+I did not have time for this. 
 
 
 

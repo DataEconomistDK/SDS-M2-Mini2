@@ -30,6 +30,8 @@ knitr::opts_chunk$set(warning=FALSE,
 options(warn=-1) # Hides all warnings, as the knitr options only work on local R-Markdown mode. 
 
 Sys.setenv(LANG = "en")
+
+rm(list=ls())
 ```
 
 I load my packages. 
@@ -56,9 +58,6 @@ set.seed(123) # Have to be set every time a rng proces is being made.
 # Preprocessing and vectorization
 Justify your choices and explain possible alternatives (e.g. removing stopwords, identifying bi/tri-grams, removing verbs or use of stemming, lemmatization etc.)
 
-Create a bag-of-words representation, apply TF-IDF and dimensionality reduction (LSA-topic modelling) to transform your corpus into a feature matrix.
-Train a word-embedding model of your choice (Word2Vec, GloVe or Fasttext) and use it to calculate average-vector-representations for the tweets.
-
 I load my data. 
 ```{r}
 data_raw <- as_tibble(fread("https://transfer.sh/Zgwhy/twitter_hate_speech.csv"))
@@ -82,24 +81,40 @@ data_tidy <- data_raw %>%
 head(data_tidy, 6)
 ```
 
-Here i have just printed the first 6 rows, and as you can see there is many words that does not cary any semantic meaning by themselves such as "a" or "you" and ect. So here we want to remove suh words by implementing stopwords, so that we only have words that carry semantic meaning by themselves. We now first now remove the most common stopwords by doing a anti join with a stopwords dictionary and also removing some custom stopwords. The custom stopwords are leftovers from the twitter format such as http, but also words i have manually choosen by going through the topwords. 
-
-We also do a bit of general cleaning, in this case removing all special characters, numbers and 1-letter words. This is because these are very contextual and does not really carry meaning in themselves.
+Here i have just printed the first 6 rows, and as you can see there is many words that does not cary any semantic meaning by themselves such as "a" or "you" and ect. So here we want to remove suh words by implementing stopwords, so that we only have words that carry semantic meaning by themselves. We now first now remove the most common stopwords by doing a anti join with a stopwords dictionary and also removing some custom stopwords. The custom stopwords are leftovers from the twitter format such as http, but also words i have manually choosen by going through the topwords. Ex. rt is retweet, and http is just the start of a webadress, so these are removed in the custom stopwords. It's hard to remove all, which would require a lot of words or a very specific stop word lexicon, so there will be some stopwords left in the data. 
 
 ```{r}
-own_stopwords <- tibble(word= c("http"),
+own_stopwords <- tibble(word= c("http", "t.co", "amp", "rt"),
                         lexicon = "OWN")
 
 data_tidy_clean <- data_tidy %>% 
   anti_join(stop_words %>% bind_rows(own_stopwords), by = "word")
+```
 
+We also do a bit of general cleaning, in this case removing all special characters, numbers and 1-letter words. This is because these are very contextual and does not really carry meaning in themselves.
+
+With tweets we have a scenario of very high amounts of documents, where each document is very little, especially after cleaning and filtering. This can cause problems later for some analysis, and therefore we need to do some extra filtering. Here i first remove words(rows) that only occur 5 or less times. Then i remove whole tweets that only have 5 or less words after cleaning. This way we have more meaningfull tweets for our analysis. 
+
+```{r}
 tweets_tidy <- data_tidy_clean %>%
   mutate(word = word %>% str_remove_all("[^[:alnum:]]") ) %>%
   mutate(word = word %>% str_remove_all("[[:digit:]]") ) %>% 
-  filter(str_length(word) > 1)
-```
+  filter(str_length(word) > 1) %>% 
+  add_count(word, name = "nword") %>% 
+  filter(nword > 5) %>% 
+  add_count(ID, name = "ntweet") %>% 
+  filter(ntweet > 5) %>%
+  select(-nword, -ntweet)
 
-I do now create a topwords tibble, by counting up all of the words and see what is the most popular. This can now be plotted to vizualise the top words. 
+number_tweets <- tweets_tidy %>% 
+  distinct(ID) %>% 
+  dim()
+
+tweets_tidy
+```
+After filtering we have reduced our "bag-of-words" model to only have 66.807 tokens (rows), down from the initial 368.169 tokens in the raw data. This also means our model now includes only ´r number_tweets[1]´ tweets down from the inital 24.783 tweets.
+
+I now create a topwords tibble, by counting up all of the words and see what is the most popular. This can now be plotted to vizualise the top words. 
 ```{r}
 topwords <- tweets_tidy %>% 
   count(word, sort = TRUE)
@@ -116,8 +131,48 @@ topwords %>%
 As we might expect there is a lot of swear words in these tweets. Also there might be a lot slang words and different variations of the same words, as this is a tendency on the internet and especially twitter where you are more limited in the amount of text. 
 
 ## TF-IDF
+Know we want to do a tf-idf analysis. Here tf is "term frequency", which is just the count of how often the word occurs in a document. Then idf is the "inverse document frequency", which decreases the weight for commonly used words and increases the weight for words that are not used very much in a collection of document. These 2 metrics are multiplied by each other to form tf-idf. So tf-idf then becomes a relative frequency metric. If the metric is high then a given word appears often in a document, compared to the rest of the documents. 
+
+Below i count how many times the word appear in each tweet (n), the total words in each tweet (total), the term frequency (tf), the inverse document frequency (idf) and finally the tf-idf which is the metric we want. 
+
+```{r}
+head(tweets_tidy, 6)
+
+tweets_tidy_count <- tweets_tidy %>% 
+  count(ID, word, sort = TRUE)
+
+tweets_tidy_sum <- tweets_tidy %>% 
+  count(ID, word, sort = TRUE) %>% 
+  group_by(ID) %>% 
+  summarize(total = sum(n))
+
+tweet_tidy_total <- left_join(tweets_tidy_count, tweets_tidy_sum) %>% 
+  mutate(tf = n/total) %>% 
+  bind_tf_idf(word, ID, n)
+
+tweet_tidy_total %>% 
+  arrange(desc(tf_idf))
+```
+
+We can now try and vizualize the highest tf-idf words in the tweets. 
+
+```{r}
+tweet_tidy_total %>% 
+  arrange(desc(tf_idf)) %>% 
+  mutate(word = factor (word, levels = rev(unique(word)))) %>% 
+  top_n(15) %>% 
+  ggplot(aes(word, tf_idf)) +
+  geom_col(show.legend = TRUE) +
+  labs(x = NULL, y = "tf idf") + 
+  coord_flip()
+```
+
+From this plot we can see that the highest tf-idf words often are slang, abbreviations or similar. This is caused by these words being used in only a few tweets very frequent, and others not really using them. 
+
 
 ## Latent semantic analysis (LSA)
+Task: dimensionality reduction (LSA-topic modelling) to transform your corpus into a feature matrix.
+
 We will now perform a LSA, which is less helpful for finding human interpretable topics, but way more stable when attempting to do a dimensionality reduction as preprocessing for supervised ML workflows, or for visualization.
 
 We first create a document-feature matrix. 
@@ -164,11 +219,47 @@ tweets_lsa_hdbscan <- tweets_lsa_umap %>% as.matrix() %>% hdbscan(minPts = 500)
 ```
 
 
+## Word-embedding model
+Train a word-embedding model of your choice (Word2Vec, GloVe or Fasttext) and use it to calculate average-vector-representations for the tweets.
+
+Here i will use GloVe to make a word-embedding model. We will do so in a quanteda corpus->token->fcm workflow. To create the mebeddings, we will use the text2vec library.
+
+We now want a document term matrix (DTM), which we will need for this analysis. DTM can be described as:
+
+- each row represents one document (each tweet).
+
+- each column represents one term.
+
+- each value (typically) contains the number of appearances of that term in that document.
+
+Since most pairings of document and term do not occur (they have the value zero), DTMs are usually implemented as sparse matrices.
+
+We here use the tidy and cleaned tweet data. 
+
+```{r}
+head(tweets_tidy)
+tweets_tidy %>% 
+  cast_dfm(document = ID, term = tweet, value = count)
+```
 
 
 
+# Explore and compare the 2 "classes of interest" - hate speech vs offensive language.
 
+## Differences by simple count
 
+Can you see differences by using simple count-based approaches?
+
+## Identifying themes for each class
+Can you identify themes (aka clusters / topics) that are specific for one class or another? Explore them using, e.g. simple crosstabs - topic vs. class and to get more detailed insights within-cluster top (TF-IDF) terms. (This step requires preprocessed/tokenized inputs).
+
+# Predicing hate speech by using superved ML 
+
+Use the ML pipeline (learned in M1) to build a classification model that can identify offensive language and hate speech. It is not an easy task to get good results. Experiment with different models on the two types of text-representations that you create in 2.
+
+Here advanced NLP feature engineering has been used, and thus everything around an overall accuracy of 85 is fine. You will see that it is not easy to lift class 0 accuracy over 0.5
+
+Good Luck!
 
 
 # Basic concepts notes
